@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solo Leveling Daily Reward Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e; /* Deep purple/blue background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+        }
+        .container {
+            max-width: 500px;
+            width: 100%;
+            background-color: #272744; /* Darker card background */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        .loading-ring {
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top: 4px solid #4ade80; /* Green loading bar */
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* New style for the rolling animation */
+        .is-rolling {
+            color: #4ade80; /* Light green color while rolling */
+            transition: color 0.1s;
+        }
+        /* Dice appearance */
+        .dice-face {
+            background-color: #111;
+            border: 4px solid #4ade80; /* Green border for effect */
+            border-radius: 12px; /* Rounded corners for a polished look */
+            width: 120px; /* Fixed size for the die face */
+            height: 120px;
+            margin: 0 auto 1rem; /* Center it and add bottom margin */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem; /* Make the number fit well */
+            box-shadow: 0 0 15px rgba(74, 222, 128, 0.4); /* Glowing effect */
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="container rounded-2xl p-6 md:p-8 text-white">
+
+    <h1 class="text-3xl font-extrabold text-center mb-2 text-yellow-400">
+        <span class="text-4xl">D</span>aily <span class="text-4xl">Q</span>uest
+    </h1>
+    <p class="text-center text-gray-400 mb-6">Roll a number between 1 and 100 to claim your reward.</p>
+
+    <div class="mb-8">
+        <!-- The roll display now uses the dice-face class for the square look -->
+        <div id="rollDisplay" class="dice-face font-black">
+            —
+        </div>
+        <div id="resultDisplay" class="text-center text-lg h-16 flex items-center justify-center rounded-lg p-2 transition-all duration-300">
+            Click 'Claim Reward' to start.
+        </div>
+    </div>
+
+    <button id="claimButton"
+            class="w-full py-4 text-xl font-bold rounded-xl 
+                   bg-green-600 hover:bg-green-700 active:bg-green-800 
+                   shadow-lg shadow-green-900/50 transition duration-150 ease-in-out transform hover:scale-[1.01]">
+        Claim Reward
+    </button>
+
+    <div id="loadingIndicator" class="hidden text-center mt-4">
+        <div class="loading-ring"></div>
+        <p class="text-sm text-gray-400 mt-2">Checking System's Inventory...</p>
+    </div>
+
+</div>
+
+<!-- Reward Table & JavaScript Logic -->
+<script type="module">
+    // --- Static Module Imports (MUST be top-level) ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Reward Logic ---
+
+    // Define the reward list with 100 unique entries (indexed 0-99)
+    // Stat terms use D&D 5e Ability Scores. Stat and Key chances have been significantly reduced.
+    const REWARD_LIST_100 = [
+        // 1-10
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #1
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A slightly used, stained handkerchief." }, // #2
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "100 Gold Pouch." }, // #3
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "100 Gold Pouch." }, // #4
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #5
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A broken mana crystal (worth 1 Gold)." }, // #6
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Wisdom (WIS)**." }, // #7
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Advanced Healing Potion (restores 8d4+8 HP)." }, // #8
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "100 Gold Pouch." }, // #9
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A note: 'Don't forget the milk.'" }, // #10
+        // 11-20
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "C-Rank Mana Crystal (worth 300 Gold)." }, // #11
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #12
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "**1-hour Debuff: 'Minor Nausea'** (Disadvantage on next two CON saves)." }, // #13
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "150 Gold Pouch." }, // #14
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #15
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Constitution (CON)**." }, // #16
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #17
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A bag of **'Mysterious Salt'**." }, // #18
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "**D-Rank Gate Key**." }, // #19 (KEPT)
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #20
+        // 21-30
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "80 Gold Pouch." }, // #21
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A useless coupon for a free hug." }, // #22
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A coin with 0 Gold value (System joke)." }, // #23
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Status Recovery Potion (cures 1 condition)." }, // #24
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "120 Gold Pouch." }, // #25
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A single, slightly used sock." }, // #26
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Strength (STR)**." }, // #27
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #28
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "**1-hour Debuff: 'Extreme Fatigue'** (Disadvantage on next Attack Roll)." }, // #29
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "120 Gold Pouch." }, // #30
+        // 31-40
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Advanced Healing Potion (restores 8d4+8 HP)." }, // #31
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Mid-Grade Mana Crystal (worth 150 Gold)." }, // #32
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #33
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "An empty, rusty oil can." }, // #34
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "**D-Rank Gate Key**." }, // #35 (KEPT)
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #36
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "130 Gold Pouch." }, // #37
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A splintered wooden practice sword." }, // #38
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Wisdom (WIS)**." }, // #39
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Advanced Healing Potion (restores 8d4+8 HP)." }, // #40
+        // 41-50
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "150 Gold Pouch." }, // #41
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A single, slightly used shoe (wrong size)." }, // #42
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #43
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #44
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "**1-hour Debuff: 'Bad Gas'** (Minor social penalty)." }, // #45
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "140 Gold Pouch." }, // #46
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "**C-Rank Gate Key**." }, // #47 (KEPT)
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Constitution (CON)**." }, // #48
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #49
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A piece of stale bread." }, // #50
+        // 51-60
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #51
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "150 Gold Pouch." }, // #52
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "110 Gold Pouch." }, // #53
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A picture of the DM smiling menacingly." }, // #54
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Status Recovery Potion (cures 1 condition)." }, // #55
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "140 Gold Pouch." }, // #56
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A handful of dust." }, // #57
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Strength (STR)**." }, // #58
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #59
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "**1-hour Debuff: 'Itchiness'** (Disadvantage on Stealth checks)." }, // #60
+        // 61-70
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "90 Gold Pouch." }, // #61
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "**C-Rank Gate Key**." }, // #62 (KEPT)
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Constitution (CON)**." }, // #63
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #64
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A half-eaten lollipop." }, // #65
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #66
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "150 Gold Pouch." }, // #67
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "145 Gold Pouch." }, // #68
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A useless but shiny pebble." }, // #69
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Wisdom (WIS)**." }, // #70
+        // 71-80
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Advanced Healing Potion (restores 8d4+8 HP)." }, // #71
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #72
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A poorly drawn map leading nowhere." }, // #73
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A half-eaten lollipop." }, // #74
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #75
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "**1-hour Debuff: 'Fumble Fingers'** (Drop first item handled in combat)." }, // #76
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "135 Gold Pouch." }, // #77
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "**C-Rank Gate Key**." }, // #78 (KEPT)
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Constitution (CON)**." }, // #79
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Low-Grade Healing Potion (restores 2d4+2 HP)." }, // #80
+        // 81-90
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A single, non-matching earring." }, // #81
+        { label: "🟢 MID-GRADE UTILITY!", color: 'bg-green-800/50 border-green-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #82
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "120 Gold Pouch." }, // #83
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "An expired coupon for a free haircut." }, // #84
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Wisdom (WIS)**." }, // #85
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Status Recovery Potion (cures 1 condition)." }, // #86
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "**E-Rank Gate Key**." }, // #87 (KEPT)
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "A rock that faintly smells of bananas." }, // #88
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Advanced Healing Potion (restores 8d4+8 HP)." }, // #89
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Strength (STR)**." }, // #90
+        // 91-100 (The high-roller prizes)
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "Advanced Healing Potion (restores 8d4+8 HP)." }, // #91
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "Mid-Grade HP Potion (restores 4d4+4 HP)." }, // #92
+        { label: "📦 JUNK ITEM.", color: 'bg-gray-800/50 border-gray-400', example: "**1-hour Debuff: 'Clumsy'** (Movement speed reduced by 5 ft.)." }, // #93
+        { label: "🔵 COMMON CONSUMABLE.", color: 'bg-blue-800/50 border-blue-400', example: "115 Gold Pouch." }, // #94
+        { label: "🌟 RARE UTILITY!", color: 'bg-yellow-800/50 border-yellow-400', example: "B-Rank Mana Crystal (worth 500 gold)." }, // #95
+        { label: "🟢 RANDOM STAT.", color: 'bg-green-800/50 border-green-400', example: "+1 to **Constitution (CON)**." }, // #96
+        { label: "✨ EPIC REWARD!", color: 'bg-yellow-800/50 border-yellow-400', example: "**A-Rank Healing Potion** (restores all HP)." }, // #97
+        { label: "✨ HIGH-GRADE ITEM!", color: 'bg-purple-800/50 border-purple-400', example: "**C-Rank Gate Key** and Advanced Healing Potion." }, // #98
+        { label: "🌟 LEGENDARY ITEM: System's Favor!", color: 'bg-yellow-800/50 border-yellow-400', example: "Permanent **+1 to a Stat of your choice** (Strength, Dexterity, Constitution, Intelligence, Wisdom, or Charisma) OR **Major Skill Runestone** (*Shadow Exchange*)." }, // #99
+        { label: "✨ DIVINE REWARD: System's Blessing!", color: 'bg-red-700/80 border-red-500', example: "Permanent **+2 to a Stat of your choice** (Double Bonus!) OR **Skill Runestone** (*Monarch's Domain*)." } // #100 (Superior prize)
+    ];
+
+    const rollDisplay = document.getElementById('rollDisplay');
+    const resultDisplay = document.getElementById('resultDisplay');
+    const claimButton = document.getElementById('claimButton');
+    
+    let rollIntervalId = null;
+
+    function getReward(roll) {
+        // Direct array lookup: roll 1 maps to index 0, roll 100 maps to index 99
+        if (roll >= 1 && roll <= 100) {
+            // Adjust the roll to be 0-indexed
+            return REWARD_LIST_100[roll - 1]; 
+        }
+        return null; // Should never happen
+    }
+
+    function displayMessage(text, colorClass, reward) {
+        // Use the reward object passed directly from getReward
+        resultDisplay.className = `text-center text-lg h-16 flex items-center justify-center rounded-xl p-2 border-2 transition-all duration-300 ${colorClass}`;
+        
+        const exampleText = reward ? reward.example : 'Reward details missing.';
+
+        // Wrap the example text in an <a> tag to make it look like a link
+        resultDisplay.innerHTML = `
+            <strong>${text}</strong><br>
+            <a href="#" onclick="return false;" class="text-xs mt-1 underline text-cyan-300 hover:text-cyan-200 block font-medium">
+                ${exampleText}
+            </a>`;
+    }
+
+    // Function to start the number cycling animation
+    function startRollAnimation() {
+        let count = 0;
+        rollDisplay.classList.add('is-rolling');
+        rollIntervalId = setInterval(() => {
+            // Cycle rapidly between 1 and 100
+            count = (count % 100) + 1; 
+            rollDisplay.textContent = String(count).padStart(2, '0');
+        }, 50); // Updates every 50ms for a fast spin
+    }
+
+    function stopRollAnimation(finalRoll) {
+        clearInterval(rollIntervalId);
+        rollDisplay.classList.remove('is-rolling');
+        // Ensure the final number is centered in the dice block
+        rollDisplay.textContent = finalRoll; 
+    }
+
+
+    function generateReward() {
+        // 1. Setup for animation
+        claimButton.disabled = true;
+        claimButton.innerHTML = '<div class="loading-ring !w-6 !h-6 !border-t-white"></div>';
+        resultDisplay.textContent = 'System rolling...';
+        resultDisplay.className = 'text-center text-lg h-16 flex items-center justify-center rounded-lg p-2 transition-all duration-300';
+        
+        // 2. Start the number cycling
+        startRollAnimation();
+
+        // 3. Simulate System processing time
+        setTimeout(() => {
+            const roll = Math.floor(Math.random() * 100) + 1;
+            const reward = getReward(roll);
+
+            // 4. Stop animation and display final result
+            stopRollAnimation(roll);
+            
+            if (reward) {
+                // Pass the whole reward object to displayMessage
+                displayMessage(reward.label, reward.color, reward);
+            } else {
+                 displayMessage("SYSTEM ERROR!", 'bg-red-800/50 border-red-400', { example: 'Error retrieving reward data for roll.' });
+            }
+
+            // 5. Re-enable button
+            claimButton.disabled = false;
+            claimButton.textContent = 'Claim Reward';
+        }, 1500); // 1.5 second delay for dramatic effect
+    }
+
+
+    // --- Firebase/Authentication Setup (Mandatory for Canvas Environment) ---
+    
+    // Check if global variables are defined
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    if (firebaseConfig) {
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Authenticate user
+        async function authenticate() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log(`[Firebase] Signed in with custom token for App ID: ${appId}`);
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("[Firebase] Signed in anonymously.");
+                }
+            } catch (error) {
+                console.error("[Firebase] Authentication failed:", error);
+            }
+        }
+
+        // Call authentication on load
+        authenticate();
+    } else {
+        console.warn("[Firebase] Firebase configuration not found. Running front-end only.");
+    }
+    
+    // Attach event listener since generateReward is now scoped inside the module
+    claimButton.addEventListener('click', generateReward);
+
+</script>
+</body>
+</html>
